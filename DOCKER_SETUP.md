@@ -32,6 +32,12 @@ This guide explains the improved Docker Compose configuration for the ADS-B Rece
 - **Configurable Ports**: All exposed ports can be customized via environment variables
 - **Conflict Resolution**: Easy to resolve port conflicts in complex environments
 
+### 7. Logging Management
+- **Log Rotation**: Automatic log rotation with configurable file size and retention
+- **Size Limits**: Container log directories use tmpfs with configurable size limits
+- **Configurable Settings**: Log file sizes and rotation policies can be customized
+- **Prevention of Log Bloat**: Prevents containers from consuming excessive disk space with logs
+
 ## Setup Instructions
 
 ### 1. Copy Environment File
@@ -75,6 +81,14 @@ docker compose logs -f ultrafeeder
 - `RESTART_POLICY`: Container restart policy (default: unless-stopped)
 - `ADSB_NETWORK_SUBNET`: Custom network subnet (default: 172.20.0.0/16)
 - Port variables: Customize exposed ports if you have conflicts
+- Logging variables: Customize log rotation and size limits
+
+### Logging Configuration
+- `LOG_MAX_SIZE`: Maximum size per log file (default: 10m)
+- `LOG_MAX_FILES`: Number of log files to retain (default: 3)
+- Individual service log sizes: `ULTRAFEEDER_LOG_SIZE`, `FR24_LOG_SIZE`, etc.
+
+All services use Docker's JSON file logging driver with automatic rotation to prevent log files from growing too large and consuming disk space.
 
 ## Advanced Configuration
 
