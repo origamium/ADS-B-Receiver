@@ -1,3 +1,18 @@
+networks:
+  adsb-network:
+    name: ${ADSB_NETWORK_NAME:-adsb-network}
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: ${ADSB_NETWORK_SUBNET:-172.20.0.0/16}
+
+volumes:
+  ultrafeeder-globe-history:
+    name: ultrafeeder-globe-history
+  ultrafeeder-graphs1090:
+    name: ultrafeeder-graphs1090
+
 services:
   ultrafeeder:
     image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder
@@ -6,12 +21,22 @@ services:
     # image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder:telegraf
     container_name: ultrafeeder
     hostname: ultrafeeder
-    restart: always 
+    restart: ${RESTART_POLICY:-unless-stopped}
+    networks:
+      - adsb-network 
     device_cgroup_rules:
       - "c 189:* rwm"
+    devices:
+      - /dev/bus/usb:/dev/bus/usb:rw
     ports:
-      - 8081:80 # to expose the web interface
-      - 9273-9274:9273-9274 # to expose the statistics interface to Prometheus
+      - "${ULTRAFEEDER_WEB_PORT:-8081}:80" # to expose the web interface
+      - "${ULTRAFEEDER_STATS_PORT:-9273}-9274:9273-9274" # to expose the statistics interface to Prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     environment:
       # --------------------------------------------------
       # general parameters:
@@ -101,21 +126,29 @@ services:
       - INFLUXDBV2_BUCKET=${INFLUX_BUCKET}
       - PROMETHEUS_ENABLE=true
     volumes:
-      - /opt/adsb/ultrafeeder/globe_history:/var/globe_history
-      - /opt/adsb/ultrafeeder/graphs1090:/var/lib/collectd
+      - ${ULTRAFEEDER_GLOBE_HISTORY_PATH:-ultrafeeder-globe-history}:/var/globe_history
+      - ${ULTRAFEEDER_GRAPHS1090_PATH:-ultrafeeder-graphs1090}:/var/lib/collectd
       - /proc/diskstats:/proc/diskstats:ro
-      - /dev/bus/usb:/dev/bus/usb
+      - /dev/bus/usb:/dev/bus/usb:rw
     tmpfs:
       - /run:exec,size=256M
       - /tmp:size=128M
       - /var/log:size=32M
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
   fr24:
     image: ghcr.io/sdr-enthusiasts/docker-flightradar24:latest
     container_name: fr24
-    restart: always
+    restart: ${RESTART_POLICY:-unless-stopped}
+    networks:
+      - adsb-network
     ports:
-      - 8754:8754
+      - "${FR24_WEB_PORT:-8754}:8754"
     environment:
       - BEASTHOST=ultrafeeder
       - MLAT=no
@@ -123,18 +156,33 @@ services:
       - BIND_INTERFACE=0.0.0.0
     dns_search: .
     depends_on:
-      - ultrafeeder
+      ultrafeeder:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8754/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
 
   piaware:
     image: ghcr.io/sdr-enthusiasts/docker-piaware:latest
     container_name: piaware
-    restart: always
+    restart: ${RESTART_POLICY:-unless-stopped}
+    networks:
+      - adsb-network
     ports:
-      - 8080:80
-      - 30003:30003
-      - 30005:30005
+      - "${PIAWARE_WEB_PORT:-8080}:80"
+      - "${PIAWARE_BEAST_PORT:-30003}:30003"
+      - "${PIAWARE_MLAT_PORT:-30005}:30005"
     environment:
-      - TZ="Asia/Tokyo"
+      - TZ=${FEEDER_TZ:-Asia/Tokyo}
       - RECEIVER_TYPE=relay
       - FEEDER_ID=${PIAWARE_KEY}
       - BEASTHOST=ultrafeeder
@@ -142,12 +190,27 @@ services:
       - /run:exec,size=64M
       - /var/log
     depends_on:
-      - ultrafeeder
+      ultrafeeder:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
 
   airnavradar:
     image: ghcr.io/sdr-enthusiasts/docker-airnavradar:latest
     container_name: airnavradar
-    restart: always
+    restart: ${RESTART_POLICY:-unless-stopped}
+    networks:
+      - adsb-network
     environment:
       - TZ=${FEEDER_TZ}
       - BEASTHOST=ultrafeeder
@@ -156,14 +219,23 @@ services:
       - ALT=${FEEDER_ALT_M}
       - SHARING_KEY=${AIRNAV_KEY}
     depends_on:
-      - ultrafeeder
+      ultrafeeder:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
 
   pfclient:
     image: ghcr.io/sdr-enthusiasts/docker-planefinder:latest
     container_name: pfclient
-    restart: always
+    restart: ${RESTART_POLICY:-unless-stopped}
+    networks:
+      - adsb-network
     ports:
-      - 30053:30053
+      - "${PLANEFINDER_PORT:-30053}:30053"
     environment:
       - TZ=${FEEDER_TZ}
       - BEASTHOST=ultrafeeder
@@ -171,4 +243,11 @@ services:
       - LONG=${FEEDER_LONG}
       - SHARECODE=${PLANEFINDER_KEY}
     depends_on:
-      - ultrafeeder
+      ultrafeeder:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
